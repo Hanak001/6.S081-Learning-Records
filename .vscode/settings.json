@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "types.h": "c",
-        "stat.h": "c"
-    }
+        "stat.h": "c",
+        "user.h": "c"
+    },
+    "window.zoomLevel": 2
 }
