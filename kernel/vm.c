@@ -126,13 +126,13 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 // addresses on the stack.
 // assumes va is page aligned.
 uint64
-kvmpa(uint64 va)
+kvmpa(pagetable_t pagetable,uint64 va)
 {
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
   
-  pte = walk(kernel_pagetable, va, 0);
+  pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
@@ -268,7 +268,19 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   return newsz;
 }
+uint64
+kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= oldsz)
+    return oldsz;
 
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
+  }
+
+  return newsz;
+}
 // Recursively free page-table pages.
 // All leaf mappings must already have been removed.
 void
@@ -335,6 +347,38 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   return -1;
 }
 
+// 拷贝用户页表到内核页表，start为起始位置，sz为大小
+// 与uvmcopy不同的是，这里的物理地址不需要重新分配(mem多余)，只要添加一份映射即可
+int u2kvmcopy(pagetable_t userpgtbl, pagetable_t kernelpgtbl, uint64 start, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+
+  uint64 start_page = PGROUNDUP(start); // 从整数页开始
+  for (i = start_page; i < start + sz; i += PGSIZE)
+  { 
+    // 不需要kalloc分配空间了
+    if ((pte = walk(userpgtbl, i, 0)) == 0)
+      panic("u2kvmcopy: pte should exist");
+    if ((*pte & PTE_V) == 0)
+      panic("u2kvmcopy: page not present");
+    pa = PTE2PA(*pte);
+    // & ~PTE_U 表示将该页的权限设置为非用户页
+    // 必须清除用户页标志，否则内核无法访问。
+    flags = PTE_FLAGS(*pte) & (~PTE_U);
+    // 用mappages添加内核页表到该物理地址的映射
+    if (mappages(kernelpgtbl, i, PGSIZE, pa, flags) != 0)
+      goto err;
+  }
+  return 0;
+
+err:
+  uvmunmap(kernelpgtbl, start_page, (i - start_page) / PGSIZE, 0); // 记得第四个参数要设置为0，因为这里没有分配新的物理内存，所以也不需要释放，如果释放，会释放用户页表的物理内存，那就出错了
+  return -1;
+}
+
+
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
 void
@@ -379,6 +423,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+  return copyin_new(pagetable,dst,srcva,len);
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -405,6 +450,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+  return copyinstr_new(pagetable,dst,srcva,max);
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -439,4 +485,74 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void vmprint(pagetable_t pagetable){
+  printf("page table %p\n",pagetable);
+  for(int i = 0;i < 512; i++){
+    pte_t pte = pagetable[i];
+    
+    if(pte&PTE_V){
+      pte_t pa = PTE2PA(pte);
+      printf("..%d: pte %p pa %p\n",i,pte,pa);
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        pagetable_t pagetable1 = (pagetable_t)pa;
+        for(int j = 0; j < 512; j++){
+          pte_t pte1 = pagetable1[j];
+          if(pte1&PTE_V){
+            pte_t pa1 = PTE2PA(pte1);
+            printf(".. ..%d: pte %p pa %p\n",j,pte1,pa1);
+            if((pte1 & (PTE_R|PTE_W|PTE_X)) == 0){
+              pagetable_t pagetable2 = (pagetable_t)pa1;
+              for(int k = 0; k < 512; k++){
+                pte_t pte2 = pagetable2[k];
+                if(pte2&PTE_V){
+                  pte_t pa2 = PTE2PA(pte2);
+                  printf(".. .. ..%d: pte %p pa %p\n",k,pte2,pa2);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  
+  }
+}
+
+void uvmmap(pagetable_t pagetable,uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(pagetable, va, sz, pa, perm) != 0)
+    panic("uvmmap");
+}
+
+pagetable_t
+proc_kpagetable()
+{
+  pagetable_t kpagetable = (pagetable_t) kalloc();
+  memset(kpagetable, 0, PGSIZE);
+
+  // uart registers
+  uvmmap(kpagetable,UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  uvmmap(kpagetable,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // CLINT
+  //uvmmap(kpagetable,CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  // PLIC
+  uvmmap(kpagetable,PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  uvmmap(kpagetable,KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  uvmmap(kpagetable,(uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  uvmmap(kpagetable,TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  return kpagetable;
 }
