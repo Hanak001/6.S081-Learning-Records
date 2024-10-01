@@ -64,12 +64,54 @@ argint(int n, int *ip)
 // Retrieve an argument as a pointer.
 // Doesn't check for legality, since
 // copyin/copyout will do that.
+// int
+// argaddr(int n, uint64 *ip)
+// {
+//   *ip = argraw(n);
+//   struct proc *p = myproc();
+  
+  
+//   //如果发现虚拟地址没有映射，就给它实际分配一下
+//   if(walkaddr(p->pagetable, *ip) == 0) {
+//     if(PGROUNDUP(p->trapframe->sp) - 1 < *ip && *ip < p->sz) {
+//     char *mem = kalloc();
+//     if(mem == 0) {
+//       return 0;
+//     }
+//     memset(mem, 0, PGSIZE);
+//       if(mappages(p->pagetable, PGROUNDDOWN(*ip), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+//         kfree(mem);
+//         return 0;
+//       }
+//     } else return -1;
+//   }
+//   return 0;
+// }
+//kernel/syscall.c
 int
 argaddr(int n, uint64 *ip)
 {
   *ip = argraw(n);
+  // struct proc *p = myproc();
+  
+  
+  // //如果发现虚拟地址没有映射，就给它实际分配一下
+  // if(walkaddr(p->pagetable, *ip) == 0) {
+  //   if(*ip < p->sz) {
+  //   char *mem = kalloc();
+  //   if(mem == 0) {
+  //     return 0;
+  //   }
+  //   memset(mem, 0, PGSIZE);
+  //     if(mappages(p->pagetable, PGROUNDDOWN(*ip), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+  //       kfree(mem);
+  //       return 0;
+  //     }
+  //   } else return -1;
+  // }
   return 0;
 }
+
 
 // Fetch the nth word-sized system call argument as a null-terminated string.
 // Copies into buf, at most max.
