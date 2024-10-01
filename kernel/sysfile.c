@@ -484,3 +484,30 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_sigalarm(void){
+  int alarmticks;
+  uint64 handler;
+  if(argint(0,&alarmticks)<0||argaddr(1,&handler)<0){
+    return -1;
+  }
+
+  struct proc *p=myproc();
+  p->alarmticks=alarmticks;
+  p->handler=(void (*)(void))handler;
+  
+
+  return 0;
+}
+uint64 
+sys_sigreturn(void){
+  struct proc* p=myproc();
+  if(p->trapframecopy!=(struct trapframe*)((char*)p->trapframe+512)){
+    return -1;
+  }
+  memmove(p->trapframe,p->trapframecopy,sizeof(struct trapframe));
+
+  p->passticks=0;
+  return p->trapframe->a0;
+}
