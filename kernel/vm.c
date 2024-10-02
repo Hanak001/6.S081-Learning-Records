@@ -364,7 +364,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0){
-      if(va0>=myproc()->sz){
+      if(dstva>=myproc()->sz){
         return -1;
       }
       char* mem=kalloc();
@@ -399,7 +399,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
     {
-      if(va0>=myproc()->sz){
+      if(srcva>=myproc()->sz){
         return -1;
       }
       char* mem=kalloc();
