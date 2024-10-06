@@ -53,7 +53,8 @@ int             readi(struct inode*, int, uint64, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, int, uint64, uint, uint);
 void            itrunc(struct inode*);
-
+void add_ref_count(uint64 pa);
+uint64 get_ref_count(uint64 pa);
 // ramdisk.c
 void            ramdiskinit(void);
 void            ramdiskintr(void);
@@ -63,7 +64,10 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
-
+void            increase_rc(void* pa);
+void* cowalloc(pagetable_t pagetable, uint64 va);
+int krefcnt(void* pa);
+int cowpage(pagetable_t pagetable, uint64 va);
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);
@@ -145,7 +149,7 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
-
+int             uvmcowcopy(pagetable_t pagetable,uint64 va);
 // uart.c
 void            uartinit(void);
 void            uartintr(void);
@@ -171,7 +175,10 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+pte_t *         walk(pagetable_t pagetable, uint64 va, int alloc);
 
+int is_cowpage(pagetable_t pagetable, uint64 va);
+void* cow_alloc(pagetable_t pagetable, uint64 va);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);

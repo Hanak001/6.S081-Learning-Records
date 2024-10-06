@@ -28,7 +28,81 @@ trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
 }
+int
+uvmcowcopy(pagetable_t pagetable,uint64 va){
+  uint64 pa;
+  pte_t* pte;
+  uint flags;
+  if(va>=MAXVA) return -1;
+  va=PGROUNDDOWN(va);
+  pte=walk(pagetable,va,0);
+  if(pte==0) return -1;
+  pa=PTE2PA(*pte);
+  if(pa==0) return -1;
+  flags=PTE_FLAGS(*pte);
+  if(PTE_COW&flags){
+    char* ka=kalloc();
+    if(ka==0) return -1;
+    memmove((char*)ka,(char*)pa,PGSIZE);
+    kfree((void*)pa);
+    flags=(flags&(~PTE_COW))|PTE_W;
+    *pte=PA2PTE((uint64)ka)|flags;
+    return 0;
+  }
+  return 0;
+}
+int is_cowpage(pagetable_t pagetable, uint64 va)
+ {
+   pte_t* pte = walk(pagetable, va, 0);
+   return *pte & PTE_COW ? 0 : -1;
+ }
 
+ void* cow_alloc(pagetable_t pagetable, uint64 va)
+ {
+   pte_t* pte = walk(pagetable, va, 0);
+   if(pte == 0) return 0;
+ 
+ // get physical address
+   uint64 pa = PTE2PA(*pte);
+ 
+     
+   // if reference count == 1
+   if(get_ref_count(pa) == 1)
+   {
+      // writable
+     *pte |= PTE_W;
+     // clear PTE_COW
+     *pte &= (~PTE_COW);
+ 
+     return (void*) pa;
+   }
+ 
+   // if reference count > 1
+   // allocate a new page
+   char* mem = kalloc();
+   if(mem == 0)
+     return 0;
+   
+   *pte |= PTE_W;
+ 
+   uint flags = PTE_FLAGS(*pte);
+ 
+   // copy 
+   memmove(mem, (char*)pa, PGSIZE);
+   // clear PTE_V, avoid a panic of remap
+   *pte &= (~PTE_V);
+   // building a mapper between virtual address and physical address 
+   if(mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0)
+   {
+     *pte |= PTE_V;
+     kfree(mem);
+     return 0;
+   }
+ 
+   kfree((char*)PGROUNDDOWN(pa));
+ 
+   return (void*) mem;
+ }
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -67,7 +141,44 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause()==13||r_scause()==15){
+    uint64 fault_va = r_stval();
+ 
+     if(fault_va > p->sz || 
+        is_cowpage(p->pagetable, fault_va) < 0 ||
+        cow_alloc(p->pagetable, PGROUNDDOWN(fault_va)) == 0)
+     {
+         p->killed = 1; // terminal current process
+     }
+    // uint64 va = r_stval();
+    // //保证当前页地址有效
+    // if (va >= MAXVA || 
+    // (va <= PGROUNDDOWN(p->trapframe->sp) 
+    // && va >= PGROUNDDOWN(p->trapframe->sp) - PGSIZE)) 
+    // {
+    //   p->killed = 1;
+    // }else if(uvmcowcopy(p->pagetable, va) != 0){
+    // //判断页是否是COW页，并且为其实际分配内存
+    //   p->killed = 1;
+    // }
+
+
+
+
+    // uint64 va = r_stval();
+    // //保证当前页地址有效
+    // if (va >= MAXVA || 
+    // (va <= PGROUNDDOWN(p->trapframe->sp) 
+    // && va >= PGROUNDDOWN(p->trapframe->sp) - PGSIZE)) 
+    // {
+    //   p->killed = 1;
+    // }else if(uvmcowcopy(p->pagetable, va) != 0){
+    // //判断页是否是COW页，并且为其实际分配内存
+    //   p->killed = 1;
+    // }
+
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

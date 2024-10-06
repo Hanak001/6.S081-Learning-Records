@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "memlayout.h": "c",
+        "random": "c",
+        "proc.h": "c",
+        "mutex": "c",
+        "condition_variable": "c",
+        "bitset": "c",
+        "chrono": "c"
+    }
+}
