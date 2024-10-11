@@ -79,6 +79,7 @@ bget(uint dev, uint blockno)
   for(b=bcache.buckets[bucketno].next;b!=0;b=b->next){
     if(b->dev==dev&&b->blockno==blockno){
       b->refcnt++;
+      b->timestamp=ticks;
       release(&bcache.buclocks[bucketno]);
       acquiresleep(&b->lock);
       return b;
@@ -111,6 +112,7 @@ bget(uint dev, uint blockno)
       cur->valid = 0;
       cur->refcnt = 1;
       pre->next=cur->next;
+      cur->timestamp=ticks;
       release(&bcache.buclocks[sno]);
 
       acquire(&bcache.buclocks[bucketno]);
